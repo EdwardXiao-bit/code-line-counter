@@ -112,6 +112,7 @@ static const std::string kHtml = R"HTML(<!DOCTYPE html>
   .actions { margin-bottom: 14px; }
   #status { min-height: 20px; margin-bottom: 12px; font-size: 13px; color: #dc2626; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  #timing { margin-top: 12px; font-size: 13px; color: #888; text-align: right; }
   th, td { padding: 8px 12px; text-align: right; }
   th:first-child, td:first-child { text-align: left; }
   thead th { border-bottom: 2px solid #8884; }
@@ -162,6 +163,8 @@ static const std::string kHtml = R"HTML(<!DOCTYPE html>
     <thead><tr><th>Language</th><th>files</th><th>blank</th><th>comment</th><th>code</th></tr></thead>
     <tbody id="body"></tbody>
   </table>
+
+  <div id="timing" class="timing"></div>
 </div>
 
 <div id="modal" class="modal hidden">
@@ -193,6 +196,7 @@ static const std::string kHtml = R"HTML(<!DOCTYPE html>
   const selectBtn = document.getElementById('selectBtn');
   const curPath = document.getElementById('curPath');
   const browseList = document.getElementById('browseList');
+  const timing = document.getElementById('timing');
 
   const LANGS = ['C', 'C++', 'Java', 'Python'];
   const EXT_RE = /\.(c|h|cpp|cc|cxx|hpp|hh|hxx|java|py)$/i;
@@ -364,8 +368,10 @@ static const std::string kHtml = R"HTML(<!DOCTYPE html>
   function mergeResults(results) {
     const acc = {};
     for (const name of LANGS) acc[name] = { files: 0, blank: 0, comment: 0, code: 0 };
+    let elapsedMs = 0;
     for (const r of results) {
       if (!r || !r.ok || !r.languages) continue;
+      elapsedMs += r.elapsedMs || 0;
       for (const l of r.languages) {
         const a = acc[l.name];
         if (!a) continue;
@@ -378,7 +384,12 @@ static const std::string kHtml = R"HTML(<!DOCTYPE html>
       total.files += l.files; total.blank += l.blank;
       total.comment += l.comment; total.code += l.code;
     }
-    return { languages, total };
+    return { languages, total, elapsedMs };
+  }
+
+  function fmtMs(ms) {
+    if (ms < 1000) return ms.toFixed(2) + ' ms';
+    return (ms / 1000).toFixed(3) + ' s';
   }
 
   function render(data) {
@@ -396,6 +407,8 @@ static const std::string kHtml = R"HTML(<!DOCTYPE html>
     for (const k of ['files', 'blank', 'comment', 'code'])
       tr.append(el('td', 'num', t[k].toLocaleString()));
     body.append(tr);
+
+    timing.textContent = '运行用时：' + fmtMs(data.elapsedMs || 0);
   }
 
   async function run() {

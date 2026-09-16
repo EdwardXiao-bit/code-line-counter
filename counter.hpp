@@ -5,9 +5,12 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -109,7 +112,12 @@ struct CountResult {
     long totalBlank = 0;
     long totalComment = 0;
     long totalCode = 0;
+    double elapsedMs = 0.0;  // wall-clock time spent counting, in milliseconds
 };
+
+// Optional callback invoked once per file after it has been counted, for
+// progress/logging output (used by the CLI; the server leaves it null).
+using FileLogger = void (*)(const std::string& lang, const fs::path& path, const Counts& c);
 
 // Return the language index for a file extension, or -1 if unsupported.
 inline int languageIndexFor(const std::string& ext) {
@@ -238,7 +246,7 @@ inline Counts countFile(const fs::path& path, const Language& lang) {
 }
 
 // Recursively count all supported source files under a directory.
-inline CountResult countDirectory(const fs::path& root) {
+inline CountResult countDirectory(const fs::path& root, FileLogger onFile = nullptr) {
     CountResult res;
     const auto& L = languages();
     for (const auto& lang : L)
@@ -251,6 +259,7 @@ inline CountResult countDirectory(const fs::path& root) {
         return res;
     }
 
+    const auto start = std::chrono::steady_clock::now();
     fs::recursive_directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec);
     const fs::recursive_directory_iterator end;
     for (; it != end; it.increment(ec)) {
@@ -265,6 +274,8 @@ inline CountResult countDirectory(const fs::path& root) {
             continue;
 
         Counts c = countFile(it->path(), L[idx]);
+        if (onFile)
+            onFile(L[idx].name, it->path(), c);
         ++res.languages[idx].files;
         res.languages[idx].blank += c.blank;
         res.languages[idx].comment += c.comment;
@@ -277,6 +288,8 @@ inline CountResult countDirectory(const fs::path& root) {
         res.totalComment += r.comment;
         res.totalCode += r.code;
     }
+    res.elapsedMs = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - start).count();
     res.ok = true;
     return res;
 }
@@ -284,15 +297,16 @@ inline CountResult countDirectory(const fs::path& root) {
 // Count one or more directories, merging the results into a single table.
 // Invalid directories are skipped and reported in `error`; the result is `ok`
 // as long as at least one directory was counted.
-inline CountResult countDirectories(const std::vector<fs::path>& dirs) {
+inline CountResult countDirectories(const std::vector<fs::path>& dirs, FileLogger onFile = nullptr) {
     CountResult merged;
     const auto& L = languages();
     for (const auto& lang : L)
         merged.languages.push_back({lang.name, 0, 0, 0, 0});
 
+    const auto start = std::chrono::steady_clock::now();
     std::vector<std::string> errors;
     for (const fs::path& d : dirs) {
-        CountResult r = countDirectory(d);
+        CountResult r = countDirectory(d, onFile);
         if (!r.ok) {
             errors.push_back(r.error);
             continue;
@@ -317,6 +331,8 @@ inline CountResult countDirectories(const std::vector<fs::path>& dirs) {
             merged.error += "; ";
         merged.error += errors[i];
     }
+    merged.elapsedMs = std::chrono::duration<double, std::milli>(
+                           std::chrono::steady_clock::now() - start).count();
     return merged;
 }
 
@@ -338,6 +354,17 @@ inline std::string jsonEscape(const std::string& s) {
     return out;
 }
 
+// Format an elapsed time in milliseconds as a human-readable string.
+inline std::string formatElapsed(double ms) {
+    std::ostringstream os;
+    os << std::fixed << std::setprecision(2);
+    if (ms < 1000.0)
+        os << ms << " ms";
+    else
+        os << (ms / 1000.0) << " s";
+    return os.str();
+}
+
 // Serialize a CountResult to JSON.
 inline std::string toJson(const CountResult& res) {
     std::string out = "{\"ok\":" + std::string(res.ok ? "true" : "false");
@@ -355,6 +382,7 @@ inline std::string toJson(const CountResult& res) {
     out += "],\"total\":{\"files\":" + std::to_string(res.totalFiles)
          + ",\"blank\":" + std::to_string(res.totalBlank)
          + ",\"comment\":" + std::to_string(res.totalComment)
-         + ",\"code\":" + std::to_string(res.totalCode) + "}}";
+         + ",\"code\":" + std::to_string(res.totalCode) + "}"
+         + ",\"elapsedMs\":" + std::to_string(res.elapsedMs) + "}";
     return out;
 }

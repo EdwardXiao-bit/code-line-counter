@@ -17,7 +17,12 @@ int main(int argc, char** argv) {
         std::cerr << "Error: '" << dir.string() << "' is not a valid directory.\n";
         return 1;
     }
-    CountResult res = countDirectory(dir);
+    CountResult res = countDirectory(dir,
+        [](const std::string& lang, const fs::path& p, const Counts& c) {
+            std::cout << "[" << lang << "] " << pathToUtf8(p)
+                      << "  code=" << c.code << "  blank=" << c.blank
+                      << "  comment=" << c.comment << '\n';
+        });
 
     const int W_NAME = 15, W_FILES = 10, W_BLANK = 11, W_COMMENT = 12, W_CODE = 12;
     const std::string sep(W_NAME + W_FILES + W_BLANK + W_COMMENT + W_CODE, '-');
@@ -44,6 +49,8 @@ int main(int argc, char** argv) {
     std::cout << sep << '\n';
     printRow("SUM", res.totalFiles, res.totalBlank, res.totalComment, res.totalCode);
     std::cout << sep << '\n';
+
+    std::cout << "Time: " << formatElapsed(res.elapsedMs) << '\n';
 
     return 0;
 }
